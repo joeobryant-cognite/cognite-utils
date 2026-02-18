@@ -2,12 +2,14 @@
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from group_backup_restore import (
     DEFAULT_ARCHIVE_DIR,
     _timestamp,
+    backup_groups_to_archive,
     list_backups,
     load_backup_json,
 )
@@ -53,3 +55,22 @@ def test_default_archive_dir_is_under_project():
     """DEFAULT_ARCHIVE_DIR is groups/archive under project root."""
     assert DEFAULT_ARCHIVE_DIR.name == "archive"
     assert DEFAULT_ARCHIVE_DIR.parent.name == "groups"
+
+
+def test_backup_groups_to_archive_writes_excel_and_json(tmp_path):
+    """backup_groups_to_archive produces one Excel and one JSON with matching timestamp."""
+    # One minimal group so build_customer_dataframe produces a non-empty column set
+    minimal_group = SimpleNamespace(id=1, name="G1", source_id=None, capabilities=[])
+    groups_by_customer = {"customer_a": [minimal_group]}
+    excel_path, json_path = backup_groups_to_archive(groups_by_customer, archive_dir=tmp_path)
+    assert excel_path.parent == tmp_path
+    assert json_path.parent == tmp_path
+    assert excel_path.suffix == ".xlsx"
+    assert json_path.suffix == ".json"
+    assert excel_path.stem == json_path.stem
+    assert excel_path.exists()
+    assert json_path.exists()
+    data = load_backup_json(json_path)
+    assert list(data) == ["customer_a"]
+    assert len(data["customer_a"]) == 1
+    assert data["customer_a"][0]["id"] == 1 and data["customer_a"][0]["name"] == "G1"

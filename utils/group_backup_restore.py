@@ -41,22 +41,15 @@ def backup_groups_to_archive(
     excel_path = archive_path / f"groups_backup_{ts}.xlsx"
     json_path = archive_path / f"groups_backup_{ts}.json"
 
-    # Build Excel (same format as export_groups)
     all_capabilities = collect_all_capabilities(groups_by_customer)
     dataframes_by_customer = {}
-    for customer_name, groups in groups_by_customer.items():
-        if groups is None:
-            dataframes_by_customer[customer_name] = None
-        else:
-            dataframes_by_customer[customer_name] = build_customer_dataframe(groups, all_capabilities)
-    write_groups_to_excel(dataframes_by_customer, excel_path)
-
-    # JSON for restore: full capability dicts per group
     backup_data = {}
     for customer_name, groups in groups_by_customer.items():
         if groups is None:
+            dataframes_by_customer[customer_name] = None
             backup_data[customer_name] = []
             continue
+        dataframes_by_customer[customer_name] = build_customer_dataframe(groups, all_capabilities)
         backup_data[customer_name] = [
             {
                 "id": g.id,
@@ -65,6 +58,7 @@ def backup_groups_to_archive(
             }
             for g in groups
         ]
+    write_groups_to_excel(dataframes_by_customer, excel_path)
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(backup_data, f, indent=2)
 

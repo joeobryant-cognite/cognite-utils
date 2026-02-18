@@ -1,27 +1,45 @@
-from pathlib import Path
 import json
 import os
+from pathlib import Path
 
 from cognite.client import ClientConfig, CogniteClient
-from cognite.client.credentials import OAuthInteractive, OAuthDeviceCode
+from cognite.client.credentials import OAuthDeviceCode, OAuthInteractive
 
-CONFIG_ENV_VAR = "./cognite_auth_config.json"
+CONFIG_ENV_VAR_NAME = "COGNITE_AUTH_CONFIG_PATH"
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "cognite_auth_config.json"
+
+_CLIENT_NAME = "Cognite Academy course taker"
 
 
 def load_customer_configs() -> dict:
-    config_path = Path(os.environ.get(CONFIG_ENV_VAR, DEFAULT_CONFIG_PATH))
+    config_path = Path(os.environ.get(CONFIG_ENV_VAR_NAME, str(DEFAULT_CONFIG_PATH)))
     if not config_path.exists():
         raise FileNotFoundError(
             f"Cognite auth config file not found. "
-            f"Create {DEFAULT_CONFIG_PATH} or set {CONFIG_ENV_VAR}."
+            f"Create {DEFAULT_CONFIG_PATH} or set {CONFIG_ENV_VAR_NAME}."
         )
-
     with config_path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
 
 
 CUSTOMER_CONFIGS = load_customer_configs()
+
+
+def _base_url(config: dict) -> str:
+    """Build CDF base URL from customer config."""
+    return f"https://{config['cdf_cluster']}.cognitedata.com"
+
+
+def _create_client(config: dict, credentials) -> CogniteClient:
+    """Build CogniteClient from config and credentials (SRP: single place for ClientConfig)."""
+    return CogniteClient(
+        ClientConfig(
+            client_name=_CLIENT_NAME,
+            project=config["cognite_project"],
+            base_url=_base_url(config),
+            credentials=credentials,
+        )
+    )
 
 
 def _get_config_and_cache(customer, token_cache_path):
@@ -47,21 +65,15 @@ def interactive_client(customer, token_cache_path=None, redirect_port=53000):
     cannot change the app registration redirect URIs.
     """
     config, cache_path = _get_config_and_cache(customer, token_cache_path)
-    base_url = f"https://{config['cdf_cluster']}.cognitedata.com"
-    return CogniteClient(
-        ClientConfig(
-            client_name="Cognite Academy course taker",
-            project=config["cognite_project"],
-            base_url=base_url,
-            credentials=OAuthInteractive(
-                authority_url=f"https://login.microsoftonline.com/{config['tenant_id']}",
-                client_id=config["client_id"],
-                scopes=[f"{base_url}/.default"],
-                redirect_port=redirect_port,
-                token_cache_path=cache_path,
-            ),
-        )
+    base_url = _base_url(config)
+    credentials = OAuthInteractive(
+        authority_url=f"https://login.microsoftonline.com/{config['tenant_id']}",
+        client_id=config["client_id"],
+        scopes=[f"{base_url}/.default"],
+        redirect_port=redirect_port,
+        token_cache_path=cache_path,
     )
+    return _create_client(config, credentials)
 
 
 def device_code_client(customer, token_cache_path=None):
@@ -79,15 +91,7 @@ def device_code_client(customer, token_cache_path=None):
         cdf_cluster=config["cdf_cluster"],
         token_cache_path=cache_path,
     )
-    base_url = f"https://{config['cdf_cluster']}.cognitedata.com"
-    return CogniteClient(
-        ClientConfig(
-            client_name="Cognite Academy course taker",
-            project=config["cognite_project"],
-            base_url=base_url,
-            credentials=credentials,
-        )
-    )
+    return _create_client(config, credentials)
 
 
 def client_with_fallback(customer, token_cache_path=None, *, verbose=False):

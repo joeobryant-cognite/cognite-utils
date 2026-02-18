@@ -6,7 +6,7 @@ import re
 
 import pandas as pd
 
-from cognite_auth import CUSTOMER_CONFIGS, device_code_client, interactive_client
+from cognite_auth import CUSTOMER_CONFIGS, client_with_fallback
 
 
 def extract_resource_name(capability) -> str:
@@ -19,23 +19,23 @@ def extract_resource_name(capability) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", resource).lower()
 
 
+def _first_token(s: str) -> str:
+    """First meaningful token from a string (before ':', \"'\", or '>')."""
+    return s.split(":")[0].split("'")[0].split(">")[0].strip().lower()
+
+
 def extract_action_name(action) -> str:
     """Extract action name from action object (e.g., Action.Read -> read)."""
     if hasattr(action, "name"):
         return str(action.name).lower()
     if hasattr(action, "value"):
         return str(action.value).lower()
-
     action_str = str(action)
     if "Action." in action_str:
-        parts = action_str.split("Action.")[-1]
-        action_name = parts.split(":")[0].split("'")[0].split(">")[0].strip()
-    elif "." in action_str:
-        action_name = action_str.split(".")[-1].split(":")[0].split("'")[0].split(">")[0].strip()
-    else:
-        action_name = action_str.split(":")[0].split("'")[0].split(">")[0].strip()
-
-    return action_name.lower()
+        return _first_token(action_str.split("Action.")[-1])
+    if "." in action_str:
+        return _first_token(action_str.split(".")[-1])
+    return _first_token(action_str)
 
 
 def is_all_scope(scope) -> bool:
@@ -104,26 +104,26 @@ def extract_capability_key(capability) -> str | list[str] | None:
     return capability_keys if len(capability_keys) > 1 else capability_keys[0]
 
 
+def _iter_capability_keys(cap) -> Iterable[str]:
+    """Yield capability key(s) from a single capability (DRY for str vs list from extract_capability_key)."""
+    cap_keys = extract_capability_key(cap)
+    if not cap_keys:
+        return
+    yield from (cap_keys if isinstance(cap_keys, list) else [cap_keys])
+
+
 def collect_all_capabilities(groups_by_customer: dict) -> list[str]:
     """Collect all unique capabilities across all customers."""
     all_capabilities = set()
-
     for groups in groups_by_customer.values():
         if groups is None:
             continue
-
         for group in groups:
             if hasattr(group, "capabilities") and group.capabilities:
                 for cap in group.capabilities:
-                    cap_keys = extract_capability_key(cap)
-                    if cap_keys:
-                        if isinstance(cap_keys, list):
-                            for key in cap_keys:
-                                all_capabilities.add(key)
-                        else:
-                            all_capabilities.add(cap_keys)
-
-    return sorted(list(all_capabilities))
+                    for key in _iter_capability_keys(cap):
+                        all_capabilities.add(key)
+    return sorted(all_capabilities)
 
 
 def get_group_capability_keys(group) -> set[str]:
@@ -132,10 +132,8 @@ def get_group_capability_keys(group) -> set[str]:
     if not hasattr(group, "capabilities") or not group.capabilities:
         return keys
     for cap_obj in group.capabilities:
-        cap_keys = extract_capability_key(cap_obj)
-        if cap_keys:
-            for key in (cap_keys if isinstance(cap_keys, list) else [cap_keys]):
-                keys.add(key)
+        for key in _iter_capability_keys(cap_obj):
+            keys.add(key)
     return keys
 
 
@@ -262,48 +260,26 @@ def export_groups(
     groups_by_customer: dict[str, object | None] = {}
     dataframes_by_customer: dict[str, pd.DataFrame | None] = {}
 
-    # Use device-code flow first (no local port); avoids conflict with wslrelay.exe on 53000.
-    # Fall back to interactive only if device code is not supported for this app.
     for customer_name in customer_list:
         if verbose:
             print(f"Fetching groups for customer: {customer_name}")
-        last_exc = None
-        success = False
         cache_path = token_cache_dir / f"{customer_name}.json" if token_cache_dir else None
-
-        for use_device_code in (True, False):
-            try:
-                if use_device_code:
-                    if verbose:
-                        print("  Using device-code flow (no local port)...")
-                    customer_client = device_code_client(customer_name, cache_path)
-                else:
-      
-                    if verbose:
-                        print("  Using interactive (browser) flow...")
-                    customer_client = interactive_client(customer_name, cache_path)
-
-                if show_profile and cache_path is not None:
-                    print_user_profile(customer_client, cache_path)
-
-                groups = customer_client.iam.groups.list(all=True)
-                groups_by_customer[customer_name] = groups
-                success = True
-
-                if verbose:
-                    print(f"  ✓ Found {len(groups)} groups for {customer_name}")
-                break
-            except Exception as exc:
-                last_exc = exc
-                if use_device_code and verbose:
-                    print(f"  Device-code flow failed ({exc}), trying interactive...")
-                continue
-
-        if not success:
-            if verbose and last_exc is not None:
-                print(f"  ✗ Error fetching groups for {customer_name}: {last_exc}")
+        try:
+            customer_client = client_with_fallback(customer_name, cache_path, verbose=verbose)
+        except Exception as exc:
+            if verbose:
+                print(f"  ✗ Error fetching groups for {customer_name}: {exc}")
             groups_by_customer[customer_name] = None
             dataframes_by_customer[customer_name] = None
+            continue
+
+        if show_profile and cache_path is not None:
+            print_user_profile(customer_client, cache_path)
+
+        groups = customer_client.iam.groups.list(all=True)
+        groups_by_customer[customer_name] = groups
+        if verbose:
+            print(f"  ✓ Found {len(groups)} groups for {customer_name}")
 
     if verbose:
         print(f"\nTotal customers processed: {len(customer_list)}")
