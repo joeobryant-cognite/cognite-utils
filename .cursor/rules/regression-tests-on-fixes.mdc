@@ -1,0 +1,27 @@
+---
+description: Add a regression test whenever a Problems-tab issue is fixed
+alwaysApply: true
+---
+
+# Regression tests for Problems-tab fixes
+
+Whenever you fix an item from the **Problems** tab (linter/type/diagnostic errors), add a **regression test** so the same issue does not recur.
+
+## What to do
+
+1. **Fix the problem** as usual.
+2. **Add or extend tests** so the fix is covered:
+   - Prefer testing the **actual code path** that had the bug (e.g. a helper in `utils/` used by notebooks).
+   - If the fix is in a notebook-only cell, consider moving the logic into a testable function in `utils/` and adding a test there; then have the notebook call that function.
+3. **Run the test** (e.g. `poetry run pytest tests/ -v -k <test_name>`) to confirm it passes.
+
+## Examples
+
+- **Invalid exception (e.g. raising `None`)**: Add a test that exercises the failing path (e.g. mocks that force the fallback) and asserts the code never raises a non-`BaseException` (e.g. `assert exc_info.value is not None` and `isinstance(..., BaseException)`).
+- **Wrong type or missing attribute**: Add a test that uses the fixed API and would fail if the bug returned (e.g. assert return type or presence of an attribute).
+- **Logic/off-by-one**: Add a test with inputs that would produce the wrong result before the fix and the correct result after.
+
+## Where tests live
+
+- Tests are under `tests/`; `pythonpath` includes `utils/` (see `pyproject.toml`).
+- Match existing style: `tests/test_<module>.py` for `utils/<module>.py`.

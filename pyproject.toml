@@ -1,0 +1,43 @@
+[tool.poetry]
+name = "cognite-utils"
+version = "0.1.0"
+description = "Utilities for working with Cognite"
+authors = ["Joe Bryant <joe@example.com>"]
+packages = [{ include = "cognite_utils" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+cognite-sdk = "^7.91.1"
+pandas = "^3.0.0"
+numpy = "^2.4.2"
+python-dateutil = "^2.9.0.post0"
+openpyxl = "^3.1.5"
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^7.2.0"
+pytest = "^8.0.0"
+coverage = "^7.0.0"
+pytest-cov = "^6.0.0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["utils"]
+
+[tool.coverage.run]
+source = ["utils"]
+omit = ["*/tests/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+]
+show_missing = true
+
+[tool.pyright]
+extraPaths = ["utils"]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
